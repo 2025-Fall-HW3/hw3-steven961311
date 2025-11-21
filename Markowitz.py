@@ -62,7 +62,10 @@ class EqualWeightPortfolio:
         """
         TODO: Complete Task 1 Below
         """
-
+        num_assets = len(assets)
+        weight = 1.0 / num_assets
+        self.portfolio_weights[assets] = weight
+        self.portfolio_weights[self.exclude] = 0.0
         """
         TODO: Complete Task 1 Above
         """
@@ -113,9 +116,13 @@ class RiskParityPortfolio:
         """
         TODO: Complete Task 2 Below
         """
-
-
-
+        local_returns = df[assets].pct_change()
+        volatility = local_returns.rolling(window=self.lookback).std()
+        inverse_volatility = 1.0 / volatility
+        sum_inverse_volatility = inverse_volatility.sum(axis=1)
+        raw_weights = inverse_volatility.div(sum_inverse_volatility, axis=0)
+        self.portfolio_weights[assets] = raw_weights.shift(1)
+        self.portfolio_weights[self.exclude] = 0.0
         """
         TODO: Complete Task 2 Above
         """
@@ -190,8 +197,17 @@ class MeanVariancePortfolio:
 
                 # Sample Code: Initialize Decision w and the Objective
                 # NOTE: You can modify the following code
-                w = model.addMVar(n, name="w", ub=1)
-                model.setObjective(w.sum(), gp.GRB.MAXIMIZE)
+                w = model.addMVar(n, name="w", lb=0.0, ub=1.0)
+
+                portfolio_return = w @ mu
+                portfolio_risk = w @ Sigma @ w
+
+                model.setObjective(
+                    portfolio_return - 0.5 * gamma * portfolio_risk,
+                    gp.GRB.MAXIMIZE
+                )
+
+                model.addConstr(w.sum() == 1)
 
                 """
                 TODO: Complete Task 3 Above

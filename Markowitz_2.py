@@ -59,22 +59,77 @@ class MyPortfolio:
         self.gamma = gamma
 
     def calculate_weights(self):
-        # Get the assets by excluding the specified column
         assets = self.price.columns[self.price.columns != self.exclude]
 
-        # Calculate the portfolio weights
         self.portfolio_weights = pd.DataFrame(
             index=self.price.index, columns=self.price.columns
         )
 
-        """
-        TODO: Complete Task 4 Below
-        """
-        
-        
-        """
-        TODO: Complete Task 4 Above
-        """
+        ret_lb = 126      
+        vol_lb = 63      
+        ma_lb = 200     
+        top_k = 4   
+        base_target_ann_vol = 0.12 
+
+        target_ann_vol = base_target_ann_vol / (1 + max(self.gamma, 0))
+
+        start_idx = ma_lb
+
+        for t in range(start_idx, len(self.price)):
+            date = self.price.index[t]
+
+            window_prices_mom = self.price.iloc[t - ret_lb : t]
+            window_returns_vol = self.returns.iloc[t - vol_lb : t]
+
+            momentum = (
+                window_prices_mom[assets].iloc[-1] / window_prices_mom[assets].iloc[0]
+                - 1
+            )
+
+            vol = window_returns_vol[assets].std()
+            vol = vol.replace(0, np.nan)
+
+            ma_window = self.price[assets].iloc[t - ma_lb : t].mean()
+            current_price = self.price[assets].iloc[t]
+            in_uptrend = current_price > ma_window
+
+            score = (momentum.clip(lower=0) / vol)
+            score = score.replace([np.inf, -np.inf], 0).fillna(0)
+
+            score[~in_uptrend] = 0
+
+            if score.sum() <= 0:
+                self.portfolio_weights.loc[date, assets] = 0.0
+                self.portfolio_weights.loc[date, self.exclude] = 0.0
+                continue
+
+            positive_assets = score[score > 0]
+            top_k_effective = min(top_k, len(positive_assets))
+            if top_k_effective == 0:
+                self.portfolio_weights.loc[date, assets] = 0.0
+                self.portfolio_weights.loc[date, self.exclude] = 0.0
+                continue
+
+            top_assets = positive_assets.nlargest(top_k_effective).index
+            w_raw = positive_assets.loc[top_assets]
+
+            w_raw = w_raw / w_raw.sum()
+
+            avg_daily_vol = vol[top_assets].mean()
+            if pd.isna(avg_daily_vol) or avg_daily_vol == 0:
+                risk_scaler = 1.0
+            else:
+                ann_vol = avg_daily_vol * np.sqrt(252)
+                if ann_vol <= 0 or pd.isna(ann_vol):
+                    risk_scaler = 1.0
+                else:
+                    risk_scaler = min(1.0, target_ann_vol / ann_vol)
+
+            w_scaled = w_raw * risk_scaler 
+
+            self.portfolio_weights.loc[date, :] = 0.0
+            self.portfolio_weights.loc[date, top_assets] = w_scaled.values
+            self.portfolio_weights.loc[date, self.exclude] = 0.0
 
         self.portfolio_weights.ffill(inplace=True)
         self.portfolio_weights.fillna(0, inplace=True)
